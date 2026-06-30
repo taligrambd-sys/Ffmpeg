@@ -7,7 +7,6 @@ on:
   workflow_dispatch:
 
 jobs:
-  # ১ নম্বর জব: FFmpeg এর .so ফাইল বিল্ড করা
   build-so-libs:
     runs-on: ubuntu-latest
     strategy:
@@ -103,7 +102,6 @@ jobs:
         name: so-libs-${{ matrix.architecture }}
         path: output/${{ matrix.architecture }}/
 
-  # ২ নম্বর জব: অটোমেটিক অ্যান্ড্রয়েড প্রজেক্ট তৈরি করে .aar বানানো
   build-aar:
     runs-on: ubuntu-latest
     needs: build-so-libs
@@ -121,28 +119,35 @@ jobs:
     - name: Setup Android SDK
       uses: android-actions/setup-android@v3
 
-    # স্ক্রিপ্টের মাধ্যমে একটি মিনিমাল অ্যান্ড্রয়েড লাইব্রেরি প্রজেক্টের সব ফাইল জেনারেট করা
     - name: Generate Android Library Project Structure
       run: |
         mkdir -p ffmpeg-library/src/main/res
         mkdir -p ffmpeg-library/src/main/jniLibs/arm64-v8a
         mkdir -p ffmpeg-library/src/main/jniLibs/armeabi-v7a
         
-        # ১. settings.gradle তৈরি
+        # settings.gradle তৈরি
         echo "include ':ffmpeg-library'" > settings.gradle
         
-        # ২. Root build.gradle তৈরি
+        # Root build.gradle তৈরি (\n এর ঝামেলা দূর করা হয়েছে)
         cat << 'EOF' > build.gradle
         buildscript {
-            repositories { google() \n mavenCentral() }
-            dependencies { classpath 'com.android.tools.build:gradle:8.1.0' }
+            repositories {
+                google()
+                mavenCentral()
+            }
+            dependencies {
+                classpath 'com.android.tools.build:gradle:8.1.0'
+            }
         }
         allprojects {
-            repositories { google() \n mavenCentral() }
+            repositories {
+                google()
+                mavenCentral()
+            }
         }
         EOF
 
-        # ৩. Library build.gradle তৈরি
+        # Library build.gradle তৈরি
         cat << 'EOF' > ffmpeg-library/build.gradle
         plugins {
             id 'com.android.library'
@@ -156,14 +161,13 @@ jobs:
         }
         EOF
 
-        # ৪. AndroidManifest.xml তৈরি
+        # AndroidManifest.xml তৈরি
         cat << 'EOF' > ffmpeg-library/src/main/AndroidManifest.xml
         <manifest xmlns:android="http://schemas.android.com/apk/res/android"
             package="com.tonmoy.ffmpeg.audio">
         </manifest>
         EOF
 
-    # তৈরি হওয়া স্ট্রাকচারের ভেতর ডাউনলোড করা .so ফাইলগুলো সেট করা
     - name: Download arm64-v8a SO
       uses: actions/download-artifact@v4
       with:
@@ -176,14 +180,12 @@ jobs:
         name: so-libs-armeabi-v7a
         path: ffmpeg-library/src/main/jniLibs/armeabi-v7a
 
-    # Gradle Wrapper ইনস্টল ও রান করা (যেহেতু আমাদের রেপোতে gradlew ফাইল নেই)
     - name: Setup Gradle Wrapper and Build AAR
       run: |
         gradle wrapper --gradle-version 8.0
         chmod +x gradlew
         ./gradlew :ffmpeg-library:assembleRelease
 
-    # ফাইনাল সচল .aar ফাইলটি আপলোড করা
     - name: Upload Final AAR Artifact
       uses: actions/upload-artifact@v4
       with:
