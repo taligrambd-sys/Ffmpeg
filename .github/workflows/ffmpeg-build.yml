@@ -1,4 +1,4 @@
-name: Build Real Standard AAR without Gradle
+name: Build Audio FFmpeg with JNI Command Executor
 
 on:
   push:
@@ -90,11 +90,51 @@ jobs:
 
         make -j4
         
+        # মূল মডিউলগুলো সেভ করা
         mkdir -p ../output/${{ matrix.architecture }}
         cp libavcodec/libavcodec.so ../output/${{ matrix.architecture }}/
         cp libavformat/libavformat.so ../output/${{ matrix.architecture }}/
         cp libswresample/libswresample.so ../output/${{ matrix.architecture }}/
         cp libavutil/libavutil.so ../output/${{ matrix.architecture }}/
+
+        # কাস্টম JNI ফাইল তৈরি যা জাভা থেকে কমান্ড নেবে এবং FFmpeg এর মেইন মেথডকে কল করবে
+        cat << 'EOF' > ffmpeg_jni.c
+        #include <jni.h>
+        #include <string.h>
+        #include <stdlib.h>
+
+        // FFmpeg এর ইন্টারনাল মেইন এক্সিকিউটর ফাংশন প্রোটোটাইপ
+        int ffmpeg_main(int argc, char **argv);
+
+        JNIEXPORT jint JNICALL
+        Java_com_tonmoy_ffmpeg_audio_FFmpeg_execute(JNIEnv *env, jclass clazz, jobjectArray cmd_array) {
+            int argc = (*env)->GetArrayLength(env, cmd_array);
+            char **argv = (char **)malloc(sizeof(char *) * argc);
+            
+            for (int i = 0; i < argc; i++) {
+                jstring string = (jstring)(*env)->GetObjectArrayElement(env, cmd_array, i);
+                const char *rawString = (*env)->GetStringUTFChars(env, string, 0);
+                argv[i] = strdup(rawString);
+                (*env)->ReleaseStringUTFChars(env, string, rawString);
+            }
+            
+            // কমান্ড রান করানো হচ্ছে
+            int result = ffmpeg_main(argc, argv);
+            
+            for (int i = 0; i < argc; i++) {
+                free(argv[i]);
+            }
+            free(argv);
+            
+            return result;
+        }
+        EOF
+
+        # কাস্টম JNI লাইব্রেরি কম্পাইল করা এবং মেইন মডিউলগুলোর সাথে লিংক করা
+        $CC -shared -fPIC ffmpeg_jni.c -o ../output/${{ matrix.architecture }}/libffmpeg_jni.so \
+          -I$TOOLCHAIN/sysroot/usr/include \
+          -I$TOOLCHAIN/sysroot/usr/include/$CROSS_PREFIX \
+          -L../output/${{ matrix.architecture }} -lavformat -lavcodec -lswresample -lavutil
 
     - name: Upload Temporary SO Artifacts
       uses: actions/upload-artifact@v4
@@ -110,45 +150,42 @@ jobs:
     - name: Checkout repository
       uses: actions/checkout@v4
 
-    - name: Set up JDK 17 (Java Compiler এর জন্য)
+    - name: Set up JDK 17
       uses: actions/setup-java@v4
       with:
         distribution: 'zulu'
         java-version: '17'
 
-    - name: Manual AAR Packaging
+    - name: Manual AAR Packaging with Command Executor
       run: |
-        # ১. অফিশিয়াল AAR ফোল্ডার স্ট্রাকচার তৈরি
         mkdir -p aar-package/jni/arm64-v8a
         mkdir -p aar-package/jni/armeabi-v7a
         mkdir -p java-build/com/tonmoy/ffmpeg/audio
         
-        # ২. AndroidManifest.xml তৈরি
+        # AndroidManifest.xml
         cat << 'EOF' > aar-package/AndroidManifest.xml
         <manifest xmlns:android="http://schemas.android.com/apk/res/android" package="com.tonmoy.ffmpeg.audio"></manifest>
         EOF
 
-        # ৩. R.txt তৈরি (ব্ল্যাঙ্ক স্ট্যান্ডার্ড ফাইল)
         touch aar-package/R.txt
 
-        # ৪. Native Library Loader জাভা ফাইল তৈরি
-        cat << 'EOF' > java-build/com/tonmoy/ffmpeg/audio/FFmpegAudio.java
+        # আসল জাভা ক্লাস যা কমান্ড এক্সিকিউট করতে পারবে
+        cat << 'EOF' > java-build/com/tonmoy/ffmpeg/audio/FFmpeg.java
         package com.tonmoy.ffmpeg.audio;
-        public class FFmpegAudio {
+        public class FFmpeg {
             static {
                 System.loadLibrary("avutil");
                 System.loadLibrary("swresample");
                 System.loadLibrary("avcodec");
                 System.loadLibrary("avformat");
+                System.loadLibrary("ffmpeg_jni"); // কাস্টম কমান্ড রানার লোড
             }
-            public static String getInfo() { return "FFmpeg Audio Loaded Successfully"; }
+            // নেটিভ কমান্ড রানার মেথড
+            public static native int execute(String[] cmd);
         }
         EOF
 
-        # ৫. জাভা কোডটি কম্পাইল করা
-        javac java-build/com/tonmoy/ffmpeg/audio/FFmpegAudio.java
-        
-        # ৬. classes.jar ফাইল তৈরি করা এবং ওটাকে প্যাকেজে পাঠানো
+        javac java-build/com/tonmoy/ffmpeg/audio/FFmpeg.java
         cd java-build
         jar cvf ../aar-package/classes.jar com/
         cd ..
@@ -165,7 +202,6 @@ jobs:
         name: so-libs-armeabi-v7a
         path: aar-package/jni/armeabi-v7a
 
-    # সব ফাইলকে একসাথে কম্প্রেস করে এক্সপিসিটলি .aar ফাইলে রূপান্তর
     - name: Generate Standard .AAR File
       run: |
         cd aar-package
