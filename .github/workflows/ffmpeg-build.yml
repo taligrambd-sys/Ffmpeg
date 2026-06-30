@@ -3,13 +3,15 @@ name: Build FFmpeg .so for Android (Multi-Arch)
 on:
   push:
     branches:
-      - main # এখানে আপনার ডিফল্ট ব্রাঞ্চের নাম (main অথবা master) দিন
-  workflow_dispatch: # ম্যানুয়ালি রান করার অপশনও সচল থাকবে
+      - main
+  workflow_dispatch:
 
 jobs:
   build-ffmpeg:
     runs-on: ubuntu-latest
     strategy:
+      # একটি আর্কিটেকচার ফেইল করলে যেন অন্যটি ক্যান্সেল না হয়, সেজন্য এটি false করা হলো
+      fail-fast: false
       matrix:
         architecture: [arm64-v8a, armeabi-v7a]
 
@@ -75,6 +77,9 @@ jobs:
           --disable-postproc \
           --disable-avfilter \
           --disable-everything \
+          --disable-vulkan \
+          --disable-hwaccels \
+          --disable-vdpau \
           --enable-avcodec \
           --enable-avformat \
           --enable-swresample \
