@@ -1,0 +1,104 @@
+name: Build FFmpeg .so for Android (Multi-Arch)
+
+on:
+  push:
+    branches:
+      - main # এখানে আপনার ডিফল্ট ব্রাঞ্চের নাম (main অথবা master) দিন
+  workflow_dispatch: # ম্যানুয়ালি রান করার অপশনও সচল থাকবে
+
+jobs:
+  build-ffmpeg:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        architecture: [arm64-v8a, armeabi-v7a]
+
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+
+    - name: Set up JDK
+      uses: actions/setup-java@v4
+      with:
+        distribution: 'zulu'
+        java-version: '17'
+
+    - name: Setup Android NDK
+      uses: android-actions/setup-android@v3
+
+    - name: Install Dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y build-essential yasm nasm cmake git make
+
+    - name: Download FFmpeg Source
+      run: |
+        git clone --depth 1 --branch release/6.0 https://github.com/FFmpeg/FFmpeg.git ffmpeg-src
+
+    - name: Build Audio-Only FFmpeg .so
+      run: |
+        cd ffmpeg-src
+        
+        NDK_PATH=$ANDROID_NDK_HOME
+        TOOLCHAIN=$NDK_PATH/toolchains/llvm/prebuilt/linux-x86_64
+        API=21
+        
+        if [ "${{ matrix.architecture }}" = "arm64-v8a" ]; then
+          ARCH="aarch64"
+          CPU="armv8-a"
+          CROSS_PREFIX="$TOOLCHAIN/bin/aarch64-linux-android-"
+          CC="$TOOLCHAIN/bin/aarch64-linux-android$API-clang"
+          CXX="$TOOLCHAIN/bin/aarch64-linux-android$API-clang++"
+        else
+          ARCH="arm"
+          CPU="armv7-a"
+          CROSS_PREFIX="$TOOLCHAIN/bin/arm-linux-androideabi-"
+          CC="$TOOLCHAIN/bin/armv7a-linux-androideabi$API-clang"
+          CXX="$TOOLCHAIN/bin/armv7a-linux-androideabi$API-clang++"
+        fi
+
+        ./configure \
+          --cross-prefix=$CROSS_PREFIX \
+          --sysroot=$TOOLCHAIN/sysroot \
+          --target-os=android \
+          --arch=$ARCH \
+          --cpu=$CPU \
+          --enable-cross-compile \
+          --enable-shared \
+          --disable-static \
+          --disable-doc \
+          --disable-ffmpeg \
+          --disable-ffplay \
+          --disable-ffprobe \
+          --disable-avdevice \
+          --disable-swscale \
+          --disable-postproc \
+          --disable-avfilter \
+          --disable-everything \
+          --enable-avcodec \
+          --enable-avformat \
+          --enable-swresample \
+          --enable-decoder=aac,mp3,flac,wav,opus \
+          --enable-encoder=aac,mp3,flac,wav,opus \
+          --enable-parser=aac,mpegaudio,opus \
+          --enable-demuxer=aac,mp3,flac,wav,ogg,mov \
+          --enable-muxer=adts,mp3,flac,wav,ogg,mp4 \
+          --enable-protocol=file,http,https,tcp,udp \
+          --cc=$CC \
+          --cxx=$CXX \
+          --enable-neon
+
+        make -j4
+        
+        OUTPUT_DIR="../output/${{ matrix.architecture }}"
+        mkdir -p $OUTPUT_DIR
+        cp libavcodec/libavcodec.so $OUTPUT_DIR/
+        cp libavformat/libavformat.so $OUTPUT_DIR/
+        cp libswresample/libswresample.so $OUTPUT_DIR/
+        cp libavutil/libavutil.so $OUTPUT_DIR/
+
+    - name: Upload Build Artifacts
+      uses: actions/upload-artifact@v4
+      with:
+        name: ffmpeg-audio-${{ matrix.architecture }}
+        path: output/${{ matrix.architecture }}/
