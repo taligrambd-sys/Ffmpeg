@@ -1,4 +1,4 @@
-name: Auto Create Android Structure and Build AAR
+name: Auto Create Android Structure and Zip for Sketchware
 
 on:
   push:
@@ -24,7 +24,7 @@ jobs:
     - name: Install Dependencies
       run: |
         sudo apt-get update
-        sudo apt-get install -y build-essential yasm nasm cmake git make
+        sudo apt-get install -y build-essential yasm nasm cmake git make zip
 
     - name: Download FFmpeg Source
       run: |
@@ -102,7 +102,7 @@ jobs:
         name: so-libs-${{ matrix.architecture }}
         path: output/${{ matrix.architecture }}/
 
-  build-aar:
+  build-zip-package:
     runs-on: ubuntu-latest
     needs: build-so-libs
 
@@ -110,84 +110,37 @@ jobs:
     - name: Checkout repository
       uses: actions/checkout@v4
 
-    - name: Set up JDK 17
-      uses: actions/setup-java@v4
-      with:
-        distribution: 'zulu'
-        java-version: '17'
-
-    - name: Setup Android SDK
-      uses: android-actions/setup-android@v3
-
-    - name: Generate Android Library Project Structure
+    - name: Generate Sketchware Library Structure
       run: |
-        mkdir -p ffmpeg-library/src/main/res
-        mkdir -p ffmpeg-library/src/main/jniLibs/arm64-v8a
-        mkdir -p ffmpeg-library/src/main/jniLibs/armeabi-v7a
+        # একটি পারফেক্ট অ্যান্ড্রয়েড জিপ স্ট্রাকচার তৈরি করা
+        mkdir -p ffmpeg-audio-package/jniLibs/arm64-v8a
+        mkdir -p ffmpeg-audio-package/jniLibs/armeabi-v7a
         
-        # settings.gradle তৈরি
-        echo "include ':ffmpeg-library'" > settings.gradle
-        
-        # Root build.gradle তৈরি (\n এর ঝামেলা দূর করা হয়েছে)
-        cat << 'EOF' > build.gradle
-        buildscript {
-            repositories {
-                google()
-                mavenCentral()
-            }
-            dependencies {
-                classpath 'com.android.tools.build:gradle:8.1.0'
-            }
-        }
-        allprojects {
-            repositories {
-                google()
-                mavenCentral()
-            }
-        }
-        EOF
-
-        # Library build.gradle তৈরি
-        cat << 'EOF' > ffmpeg-library/build.gradle
-        plugins {
-            id 'com.android.library'
-        }
-        android {
-            namespace 'com.tonmoy.ffmpeg.audio'
-            compileSdk 34
-            defaultConfig {
-                minSdk 21
-            }
-        }
-        EOF
-
-        # AndroidManifest.xml তৈরি
-        cat << 'EOF' > ffmpeg-library/src/main/AndroidManifest.xml
-        <manifest xmlns:android="http://schemas.android.com/apk/res/android"
-            package="com.tonmoy.ffmpeg.audio">
-        </manifest>
+        # মিনিমাল Manifest যোগ করা (Sketchware এর সুবিধার জন্য)
+        cat << 'EOF' > ffmpeg-audio-package/AndroidManifest.xml
+        <manifest xmlns:android="http://schemas.android.com/apk/res/android" package="com.tonmoy.ffmpeg.audio"></manifest>
         EOF
 
     - name: Download arm64-v8a SO
       uses: actions/download-artifact@v4
       with:
         name: so-libs-arm64-v8a
-        path: ffmpeg-library/src/main/jniLibs/arm64-v8a
+        path: ffmpeg-audio-package/jniLibs/arm64-v8a
 
     - name: Download armeabi-v7a SO
       uses: actions/download-artifact@v4
       with:
         name: so-libs-armeabi-v7a
-        path: ffmpeg-library/src/main/jniLibs/armeabi-v7a
+        path: ffmpeg-audio-package/jniLibs/armeabi-v7a
 
-    - name: Setup Gradle Wrapper and Build AAR
+    # কোন গ্র্যাডল ছাড়া সরাসরি লিনাক্স জিপ কমান্ড দিয়ে জিপ ফাইল তৈরি
+    - name: Create Clean Zip Package
       run: |
-        gradle wrapper --gradle-version 8.0
-        chmod +x gradlew
-        ./gradlew :ffmpeg-library:assembleRelease
+        cd ffmpeg-audio-package
+        zip -r ../ffmpeg-audio-libs.zip .
 
-    - name: Upload Final AAR Artifact
+    - name: Upload Final Zip Artifact
       uses: actions/upload-artifact@v4
       with:
-        name: ffmpeg-audio-release-aar
-        path: ffmpeg-library/build/outputs/aar/*-release.aar
+        name: ffmpeg-audio-libs
+        path: ffmpeg-audio-libs.zip
